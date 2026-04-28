@@ -1,0 +1,3 @@
+system,test_perplexity
+full_rag_with_retrieval,8.088660133593306
+baseline_without_retrieval,9.591492863399253
