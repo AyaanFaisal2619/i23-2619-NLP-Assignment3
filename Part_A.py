@@ -12,13 +12,13 @@ from torch.utils.data import DataLoader, Dataset
 
 SEED = 42
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 
-DATA_DIR = "Dataset"
-LEGACY_DATA_DIR = "processed_data"
+DATA_DIR = os.path.join(PROJECT_ROOT, "Dataset")
 DATASET_PT = os.path.join(DATA_DIR, "dataset.pt")
-TRAIN_CSV = "dataset_train.csv"
-VAL_CSV = "dataset_val.csv"
-TEST_CSV = "dataset_test.csv"
+TRAIN_CSV = os.path.join(DATA_DIR, "dataset_train.csv")
+VAL_CSV = os.path.join(DATA_DIR, "dataset_val.csv")
+TEST_CSV = os.path.join(DATA_DIR, "dataset_test.csv")
 
 TEXT_COL = "reviewText"
 RATING_COL = "overall"
@@ -40,8 +40,8 @@ NUM_LAYERS = 2
 WEIGHT_DECAY = 5e-4
 DROPOUT = 0.3
 
-RESULTS_DIR = "results"
-MODELS_DIR = "models"
+RESULTS_DIR = os.path.join(PROJECT_ROOT, "results")
+MODELS_DIR = os.path.join(PROJECT_ROOT, "models")
 MODEL_PATH = os.path.join(MODELS_DIR, "multitask_transformer.pt")
 CURVES_CSV_PATH = os.path.join(RESULTS_DIR, "learning_curves.csv")
 CURVES_PNG_PATH = os.path.join(RESULTS_DIR, "learning_curves.png")
@@ -59,6 +59,15 @@ def map_sentiment(rating):
     if rating == 3:
         return 1  # Neutral
     return 2  # Positive
+
+
+def resolve_csv_path(filename):
+    path = os.path.join(DATA_DIR, filename)
+    if os.path.exists(path):
+        return path
+    raise FileNotFoundError(
+        f"Could not find {filename} in {DATA_DIR}."
+    )
 
 
 def count_words(text):
@@ -368,33 +377,31 @@ def main():
     os.makedirs(MODELS_DIR, exist_ok=True)
     os.makedirs(DATA_DIR, exist_ok=True)
 
-    dataset_path = DATASET_PT
-    if not os.path.exists(dataset_path):
-        legacy_path = os.path.join(LEGACY_DATA_DIR, "dataset.pt")
-        if os.path.exists(legacy_path):
-            dataset_path = legacy_path
-        else:
-            raise FileNotFoundError(
-                "dataset.pt not found in Dataset/ or processed_data/. "
-                "Run preprocessing and place output in Dataset/dataset.pt."
-            )
+    if not os.path.exists(DATASET_PT):
+        raise FileNotFoundError(
+            f"{DATASET_PT} not found. Run preprocessing and place output in Dataset/dataset.pt."
+        )
 
-    tensor_data = torch.load(dataset_path)
+    tensor_data = torch.load(DATASET_PT)
     train_input_ids = tensor_data["train"].long()
     val_input_ids = tensor_data["val"].long()
     test_input_ids = tensor_data["test"].long()
     vocab = tensor_data["vocab"]
 
     print("Derived task: predict lexical diversity class (low/medium/high)")
-    train_df = pd.read_csv(TRAIN_CSV)
+    train_csv_path = resolve_csv_path("dataset_train.csv")
+    val_csv_path = resolve_csv_path("dataset_val.csv")
+    test_csv_path = resolve_csv_path("dataset_test.csv")
+
+    train_df = pd.read_csv(train_csv_path)
     train_diversity = train_df[TEXT_COL].apply(lexical_diversity)
     low_thr = float(train_diversity.quantile(0.33))
     high_thr = float(train_diversity.quantile(0.66))
     print(f"Derived bins (from train set): low < {low_thr:.3f}, medium < {high_thr:.3f}, high >= {high_thr:.3f}")
 
-    train_targets, _ = build_targets(TRAIN_CSV, low_thr, high_thr)
-    val_targets, _ = build_targets(VAL_CSV, low_thr, high_thr)
-    test_targets, _ = build_targets(TEST_CSV, low_thr, high_thr)
+    train_targets, _ = build_targets(train_csv_path, low_thr, high_thr)
+    val_targets, _ = build_targets(val_csv_path, low_thr, high_thr)
+    test_targets, _ = build_targets(test_csv_path, low_thr, high_thr)
 
     train_dataset = ReviewDataset(train_input_ids, train_targets.sentiment, train_targets.derived_label)
     val_dataset = ReviewDataset(val_input_ids, val_targets.sentiment, val_targets.derived_label)
